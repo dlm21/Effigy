@@ -1,6 +1,7 @@
 """§3.5 driven with TestClient and steps._echo: jobs, meta.json, events, cancel, OOM, resident worker,
 Models & Licences (M14)."""
 
+import json
 import sys
 import time
 from pathlib import Path
@@ -643,3 +644,17 @@ def test_an_output_may_be_a_folder_of_files_but_not_an_empty_one(tmp_path):
     assert jobs._check_outputs(tmp_path, out) == "missing outputs: ['frames']"
     (tmp_path / "frames" / "a.png").write_bytes(b"x")
     assert jobs._check_outputs(tmp_path, out) is None
+
+
+def test_clips_from_the_chosen_models_folder(client, tmp_path, monkeypatch):
+    import steps.anim  # imported before the folder is chosen, as in the server
+
+    doc = json.dumps({"animations": [{"name": "Walk"}, {"name": "Rest"}]}).encode()
+    glb = tmp_path / "models/clips/mesh2motion/creatures/fox-animations.glb"
+    glb.parent.mkdir(parents=True)
+    glb.write_bytes(b"glTF" + bytes(8) + len(doc).to_bytes(4, "little") + b"JSON" + doc)
+    monkeypatch.setenv("EFFIGY_MODELS", str(tmp_path / "models"))
+    assert steps.anim.PACK != glb.parents[1]
+    assert client.get("/api/clips?template=fox").json() == [
+        {"name": "Walk", "file": "creatures/fox-animations.glb"}
+    ]

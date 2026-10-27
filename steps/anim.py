@@ -36,17 +36,17 @@ def clip_names(glb: Path) -> list[str]:
     return [a.get("name", f"clip_{i}") for i, a in enumerate(doc.get("animations", []))]
 
 
-def catalogue(template: str = _templates.HUMAN) -> list[dict]:
+def catalogue(template: str = _templates.HUMAN, pack: Path = PACK) -> list[dict]:
     """Every clip for a skeleton: {"name", "file"} (the human pack, or a creature template's own clips,
-    its rest pose left out)."""
+    its rest pose left out). `pack`: the server's models folder is the user's choice, not EFFIGY_MODELS."""
     if template != _templates.HUMAN:
-        glb = PACK / "creatures" / f"{template}-animations.glb"
+        glb = pack / "creatures" / f"{template}-animations.glb"
         names = clip_names(glb) if glb.is_file() else []
         return [
             {"name": n, "file": f"creatures/{glb.name}"} for n in names if "rest" not in n.lower()
         ]
     return [
-        {"name": n, "file": glb.name} for glb in sorted(PACK.glob("*.glb")) for n in clip_names(glb)
+        {"name": n, "file": glb.name} for glb in sorted(pack.glob("*.glb")) for n in clip_names(glb)
     ]
 
 
@@ -79,7 +79,15 @@ def _creature(src: Path, out: Path, template: str, clips: list[str], yaw: float)
 def run(op, in_dir, out_dir, params):
     src, out = Path(in_dir or ""), Path(out_dir)
     if not in_dir or not (src / "rigged.glb").is_file():
-        raise StepError("missing_input", "anim needs a skinned version (Rig panel: Skin it)")
+        if in_dir and (src / "rigged_anim.glb").is_file():  # an anim or anim_edit version
+            raise StepError(
+                "missing_input",
+                f"{src.name} is already animated: add animations on its skinned model (Add or change "
+                "animations), ticking every one you want",
+            )
+        raise StepError(
+            "missing_input", "anim needs a skinned version (Character: Attach to skeleton)"
+        )
     skel = (
         json.loads((src / "skeleton.json").read_text(encoding="utf-8"))
         if (src / "skeleton.json").is_file()

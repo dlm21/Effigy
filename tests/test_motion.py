@@ -274,3 +274,12 @@ def test_the_retarget_tells_mixamo_from_soma_and_ue5_and_keeps_a_prefix():
     assert root == "mixamorig1:Hips" and m["LeftHand"] == "mixamorig1:LeftHand" and len(m) == 52
     assert maps.source_map(Arm(ours)) == (maps.MIXAMO, "Hips")
     assert maps.source_map(Arm(["Root", "Hips", "Chest"])) == (maps.SOMA, "Hips")  # as before
+
+
+def test_anim_on_an_animated_version_points_to_its_skinned_model(tmp_path):
+    src = tmp_path / "037_anim_edit"
+    src.mkdir()
+    (src / "rigged_anim.glb").write_bytes(b"")
+    with pytest.raises(StepError) as e:
+        anim.run("run", src, tmp_path / "out", {"clips": ["Run"]})
+    assert e.value.code == "missing_input" and "already animated" in str(e.value)

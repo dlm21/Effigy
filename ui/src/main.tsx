@@ -1570,19 +1570,14 @@ function Workspace(props: {
       key={`${id}/${src!.version}`}
       asset={id}
       version={src!}
+      skinned={ancestors(versions, src).find((a) => actsAs(a) === "rig_skin")?.version}
       motions={versions.filter((x) => x.step === "motion" || x.step === "mocap" || x.step === "import_motion")}
       onView={setRigView}
       onEditing={setAnimEditing}
       chain={props.chain}
       onPick={props.pick}
-      onRun={(params, step = "rig_fit", parent = src!.version) =>
-        props.guard(
-          (async () => {
-            const { job_id } = await api.run(id, step, parent, params);
-            props.track(job_id, step, id, parent);
-          })(),
-        )
-      }
+      // through the chain: the view lands on what it made (Attach to skeleton left the skeleton page up, without Animate)
+      onRun={(params, step = "rig_fit", parent = src!.version) => props.chain(id, parent, [[step, params]])}
     />
   );
   // opens the panel section with that id (and every <details> around it) and scrolls to it: the Tools menu and the task row use it
@@ -3283,9 +3278,9 @@ const STEP_HELP: Record<string, StepHelp> = {
   anim: {
     title: "Rig: add animations",
     what: "Retargets clips from the bundled pack (Mesh2Motion, CC0) onto the skeleton; the result plays in the viewer and exports with the model.",
-    needs: "A Skinned version (Character: Attach to skeleton).",
+    needs: "A Skinned version (Character: Attach to skeleton), not an animated one: it makes one with just these clips.",
     params: [
-      ["clips", 'clip names from the pack, e.g. ["Idle_A", "Walk", "Jog"], or the version names of your motions, e.g. "310_motion" (the Character panel lists them)'],
+      ["clips", 'clip names from the pack, e.g. ["Idle_A", "Walk", "Jog"] (an animal has its own: the skinned model lists them), or the version names of your motions, e.g. "310_motion" (the Character panel lists them)'],
     ],
     example: { clips: ["Idle_A", "Walk", "Jog"] },
   },
@@ -3992,7 +3987,7 @@ function MotionInfo(props: { asset: string; version: Meta; versions: Meta[]; cha
   );
 }
 
-function AnimInfo(props: { asset: string; version: Meta; onPick: (version: string) => void; onEdit: () => void }) {
+function AnimInfo(props: { asset: string; version: Meta; skinned?: string; onPick: (version: string) => void; onEdit: () => void }) {
   const [clips, setClips] = useState<{ name: string; seconds: number }[] | null>(null);
   const [still, setStill] = useState<string[]>([]);
   useEffect(() => {
@@ -4030,11 +4025,18 @@ function AnimInfo(props: { asset: string; version: Meta; onPick: (version: strin
         <button className="primary" onClick={props.onEdit}>
           Edit animation
         </button>
-        {props.version.parent && props.version.step !== "import_model" && (
-          <button onClick={() => props.onPick(props.version.parent!)}>{props.version.step === "anim" ? "Back to the skinned model" : "Back to the previous animation"}</button>
+        {props.skinned && <button onClick={() => props.onPick(props.skinned!)}>Add or change animations</button>}
+        {props.version.parent && !["anim", "import_model"].includes(props.version.step) && (
+          <button onClick={() => props.onPick(props.version.parent!)}>Back to the previous animation</button>
         )}
       </div>
       <p className="muted">Edit animation opens a timeline under the view: turn bones at any frame to correct a pose, trim, loop or smooth a clip.</p>
+      {props.skinned && (
+        <p className="muted">
+          Add or change animations opens the skinned model. Tick every animation you want there: each Add makes a new animated model with just those, and
+          edits made by hand stay on this one.
+        </p>
+      )}
     </div>
   );
 }
@@ -4203,6 +4205,7 @@ function SkinQA(props: {
 function RigPanel(props: {
   asset: string;
   version: Meta;
+  skinned?: string; // the skinned model an animated one was made from: where animations are added
   motions: Meta[];
   onView: (r: RigView | null) => void;
   onEditing?: (on: boolean) => void; // M37: the animation editor is open (the viewer makes room for its timeline)
@@ -4219,9 +4222,8 @@ function RigPanel(props: {
   const onRun = (params: object, step?: string, parent?: string) => run(() => props.onRun(params, step, parent));
   const v = props.version;
   // an editor's save: the new version, or null when the step was refused or failed (the editor then stays open
-  // with its edits and history; audit 2026-10-10, UI-001). Without a chain (an older mount) the old fire-and-close.
-  const save = (step: string, params: object): Promise<unknown> =>
-    props.chain ? props.chain(props.asset, v.version, [[step, params]]) : props.onRun(params, step).then(() => true);
+  // with its edits and history; audit 2026-10-10, UI-001)
+  const save = (step: string, params: object): Promise<unknown> => props.chain(props.asset, v.version, [[step, params]]);
   const [data, setData] = useState<{
     joints: Joint[];
     markers: Record<string, Vec3>;
@@ -4389,7 +4391,7 @@ function RigPanel(props: {
           onClose={() => setAnimEditing(false)}
         />
       ) : (
-        <AnimInfo asset={props.asset} version={v} onPick={props.onPick} onEdit={() => setAnimEditing(true)} />
+        <AnimInfo asset={props.asset} version={v} skinned={props.skinned} onPick={props.onPick} onEdit={() => setAnimEditing(true)} />
       );
     if (step === "rig_skin") return <SkinQA asset={props.asset} version={v} motions={props.motions} onPick={props.onPick} onRun={onRun} busy={busy} />;
     if (!data) return <p className="muted">Loading the skeleton…</p>;

@@ -434,8 +434,11 @@ On the skinned model, **Animation source** has four ways:
 - **From a file**: an FBX, GLB, glTF or BVH animation on a Mixamo, Unreal (Manny, Quinn) or Kimodo skeleton.
   **Import animation**. Its licence is yours to check.
 
-The animated model plays its clips from the view's **Animation** menu. A clip whose bones did not match says it
-**never moves**.
+The animated model opens when they are done and plays its clips from the view's **Animation** menu. A clip whose
+bones did not match says it **never moves**.
+
+**Add or change animations** on an animated model goes back to its skinned model. Tick every clip you want there:
+each **Add animations** makes a new animated model with just those, and edits made by hand stay on the old one.
 
 ### The animation editor
 
