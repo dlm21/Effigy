@@ -2,7 +2,7 @@
 
 An AMD Radeon RX 7900 (XT, XTX, GRE: gfx1100) on Linux with the system's
 ROCm 7.2.4 in `/opt/rocm`. Tested on an RX 7900 XTX (24 GB, CachyOS, kernel 7.3, a Ryzen 9800X3D whose iGPU HIP
-sees too): everything but parallax layers.
+sees too): every feature.
 
 Measured 2026-10-26, one run each (the first run of a step also loads its models from disk):
 
@@ -16,12 +16,13 @@ Measured 2026-10-26, one run each (the first run of a step also loads its models
 | Parts (GeoSAM2) | `parts` views, then one click on the hat | the hat (with the braid) in 10 s, 2.4 GB; `full` from the side view found no part |
 | Motion from text (Kimodo) | "A person waves with the right hand.", 4 s, encoder on the CPU | 120 frames in 30 s; the right arm moves 12× the left |
 | Motion from video (GEM-X) | `best`, a 200-frame render of the archer walking | 98 s, 5.8 GB; both legs swing, the hips cross the frame, feet locked |
-| **Parallax layers (MoGe-3)** | `depth` | **refused on AMD**: one of FlexGEMM's Triton kernels hung the card ("HW Exception … GPU Hang") and froze the desktop it drives; Setup refuses its install on AMD and `steps/depth.py` stops before loading it |
+| Parallax layers (MoGe-3, Z-Image) | `depth` then `layers`, the village that hung the card before (`amd_layers`) | depth 9.0 s with the load, 10.8 GB; 4 layers in 72 s, 10.4 GB. MoGe-3's refiner runs **without Triton** on AMD: one of FlexGEMM's Triton kernels hung the card ("HW Exception … GPU Hang") and froze the desktop it drives (measured 2026-10-27; `steps/depth.py`) |
 
 What differs from Windows: the big GEMMs are right here (torch 2.9.1+rocm7.2.4 on the 7900 XTX: every shape to
 4.2M rows in fp32/fp16/bf16 against the CPU), so `steps/_rocm.py`'s row blocks stay a Windows workaround; the steps
 are pinned to the big card (`CUDA_VISIBLE_DEVICES`, which HIP honours: Kimodo's text encoder split itself over the
-iGPU too and hung); GEM-X's SOMA runs without NVIDIA Warp (engine/gemx/PATCHES.md).
+iGPU too and hung); GEM-X's SOMA runs without NVIDIA Warp (engine/gemx/PATCHES.md); MoGe-3's refiner
+without FlexGEMM's Triton kernels (`steps/depth.py`; its depth agrees with MoGe-2's at r 0.997).
 
 ## Install
 

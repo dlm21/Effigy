@@ -189,14 +189,50 @@ def test_the_layers_step_draws_what_the_nearer_bands_hide(tmp_path, monkeypatch)
     assert res["metrics"]["count"] == 4 and res["metrics"]["scroll_scales"][-1] == 1
 
 
-def test_depth_refuses_on_amd_before_loading_anything(tmp_path, monkeypatch):
-    """MoGe-3's FlexGEMM Triton kernels hung an RX 7900 XTX (ROCm 7.2.4) and froze its desktop: refused at once."""
-    (tmp_path / "meta.json").write_text(
-        json.dumps({"version": "001_concepts", "outputs": {"image": "i.png"}})
+def test_depth_on_amd_pools_and_upsamples_without_triton(monkeypatch):
+    """AMD: MoGe-3's refiner without FlexGEMM's Triton kernels (one hung an RX 7900 XTX): the pool averages the
+    voxels in each coarse one, the upsample gives each fine voxel its parent's value, a Triton launch fails."""
+    torch = pytest.importorskip("torch")
+
+    class Layer:
+        def __init__(self):
+            self.factor, self.linear = 2, lambda x: x
+
+    fsb = SimpleNamespace(
+        PoolDown=type("PoolDown", (Layer,), {}),
+        NearestUp=type("NearestUp", (Layer,), {}),
+        _ceil_downsample_shape=lambda shape, dim, f: torch.Size(
+            [1, *((s + f - 1) // f for s in shape[1:4]), shape[4]]
+        ),
+        _with_channels=lambda shape, c: torch.Size([*shape[:-1], c]),
     )
-    monkeypatch.setitem(
-        sys.modules, "torch", SimpleNamespace(version=SimpleNamespace(hip="7.2.53211"))
+    jit = SimpleNamespace(KernelInterface=type("KernelInterface", (), {}))
+    for name, mod in {
+        "flex_gemm": SimpleNamespace(config=SimpleNamespace()),
+        "triton": SimpleNamespace(runtime=SimpleNamespace(jit=jit)),
+        "triton.runtime": SimpleNamespace(jit=jit),
+        "triton.runtime.jit": jit,
+        "moge.model.modules": SimpleNamespace(flex_sparse_blocks=fsb),
+        "moge.model.modules.flex_sparse_blocks": fsb,
+    }.items():
+        monkeypatch.setitem(sys.modules, name, mod)
+    depth._moge_without_triton()
+    coords = torch.tensor(
+        [[0, 0, 0, 0], [0, 1, 1, 1], [0, 2, 0, 0], [0, 3, 1, 0]], dtype=torch.int32
     )
+    feats = torch.tensor([[1.0], [3.0], [5.0], [7.0]])
+    pooled, coarse, shape, cache = fsb.PoolDown().forward(
+        feats, coords, torch.Size([1, 4, 2, 2, 1])
+    )
+    assert coarse.tolist() == [[0, 0, 0, 0], [0, 1, 0, 0]] and pooled.flatten().tolist() == [
+        2.0,
+        6.0,
+    ]
+    assert shape == torch.Size([1, 2, 1, 1, 1]) and coarse.dtype == torch.int32
+    up, at, _ = fsb.NearestUp().forward(
+        pooled, coarse, shape, coords, torch.Size([1, 4, 2, 2, 1]), cache.T
+    )
+    assert up.flatten().tolist() == [2.0, 2.0, 6.0, 6.0] and at is coords
     with pytest.raises(StepError) as e:
-        depth.run("run", str(tmp_path), str(tmp_path / "out"), {})
-    assert e.value.code == "failed" and "AMD" in str(e.value)
+        jit.KernelInterface()[1]
+    assert e.value.code == "failed" and "Triton" in str(e.value)
