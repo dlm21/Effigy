@@ -1,20 +1,30 @@
-# AMD/ROCm (Windows, RX 9070 XT gfx1201) replacement for pyproject's `ml` group. Not uv-synced:
+# AMD/ROCm (Windows, RX 9070 XT gfx1201; Linux, RX 7900 and RX 9070) replacement for pyproject's `ml` group.
+# Not uv-synced (run.bat and run.sh do this):
 #   uv venv --python 3.12 .venv-ml
 #   uv pip install --python .venv-ml -r requirements-ml-rocm.txt
 #   uv pip uninstall --python .venv-ml triton-windows   (flex_gemm's wheel metadata pulls it in)
-#   .venv-ml\Scripts\rocm-sdk init
+#   .venv-ml\Scripts\rocm-sdk init   (Windows only)
 # torch from AMD's Windows ROCm repo instead of pytorch-cu128; the three kernel wheels built with HIP
 # (wheels/rocm, see docs/howto/amd-rocm-windows.md); no triton-windows (FlexGEMM runs EXPLICIT_GEMM);
 # onnxruntime CPU.
-https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm-7.2.1.tar.gz
-https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl
-https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl
-https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl
-https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
-https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchvision-0.24.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl
-wheels/rocm/cumesh-0.0.1-cp312-cp312-win_amd64.whl
-wheels/rocm/flex_gemm-1.0.0-cp312-cp312-win_amd64.whl
-wheels/rocm/o_voxel-0.0.1-cp312-cp312-win_amd64.whl
+https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm-7.2.1.tar.gz ; sys_platform == 'win32'
+https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_core-7.2.1-py3-none-win_amd64.whl ; sys_platform == 'win32'
+https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_devel-7.2.1-py3-none-win_amd64.whl ; sys_platform == 'win32'
+https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/rocm_sdk_libraries_custom-7.2.1-py3-none-win_amd64.whl ; sys_platform == 'win32'
+https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torch-2.9.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl ; sys_platform == 'win32'
+https://repo.radeon.com/rocm/windows/rocm-rel-7.2.1/torchvision-0.24.1%2Brocm7.2.1-cp312-cp312-win_amd64.whl ; sys_platform == 'win32'
+wheels/rocm/cumesh-0.0.1-cp312-cp312-win_amd64.whl ; sys_platform == 'win32'
+wheels/rocm/flex_gemm-1.0.0-cp312-cp312-win_amd64.whl ; sys_platform == 'win32'
+wheels/rocm/o_voxel-0.0.1-cp312-cp312-win_amd64.whl ; sys_platform == 'win32'
+# Linux (RX 7900 gfx1100, RX 9070 gfx1201): AMD's torch for the system's ROCm 7.2.4 (/opt/rocm), the
+# kernel wheels built for both archs (docs/howto/amd-rocm-linux.md); Triton is there, FlexGEMM still runs
+# EXPLICIT_GEMM (engine/trellis2/patches.py)
+https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.4/torch-2.9.1%2Brocm7.2.4.lw.git39497456-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux'
+https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.4/torchvision-0.24.0%2Brocm7.2.4.gitb919bd0c-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux'
+https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.4/triton-3.5.1%2Brocm7.2.4.gita272dfa8-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux'
+wheels/rocm/cumesh-0.0.1-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux'
+wheels/rocm/flex_gemm-1.0.0-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux'
+wheels/rocm/o_voxel-0.0.1-cp312-cp312-linux_x86_64.whl ; sys_platform == 'linux'
 # the rest of the `ml` group, as pyproject.toml has it
 fastapi>=0.115
 uvicorn>=0.30
