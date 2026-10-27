@@ -3,7 +3,10 @@
 The GEMMs behind matmul / F.linear return wrong numbers once the left operand has more than 2**19 rows
 (fp32; 2**20-2**22 for fp16/bf16), with hipBLASLt and rocBLAS alike: TRELLIS's per-voxel layers run over
 3-4M voxels, so the decoders put out garbage and NaN (the mesh vertices, the texture). Above ROWS rows the
-product is computed a block of rows at a time. Measured in docs/bench/amd-rocm.md; no-op on CUDA and CPU.
+product is computed a block of rows at a time. Measured in docs/bench/amd-rocm.md; no-op on CUDA and CPU, and on
+Linux: torch 2.9.1+rocm7.2.4 on an RX 7900 XTX got every shape right up to 4.2M rows in fp32/fp16/bf16
+(docs/howto/amd-rocm-linux.md), and the wrapped torch.matmul broke torch.jit.script (Kimodo). Linux runs only
+the cards measured there (server/gpu_amd.ROCM_CARDS): an RX 9070 joins after this check on it.
 """
 
 import functools
@@ -45,7 +48,11 @@ class _AfterTorch(importlib.abc.MetaPathFinder):
 def _patch() -> None:
     import torch
 
-    if not torch.version.hip or getattr(torch.matmul, "effigy_rows", False):
+    if (
+        not torch.version.hip
+        or sys.platform != "win32"
+        or getattr(torch.matmul, "effigy_rows", False)
+    ):
         return
     F = torch.nn.functional
     F.linear = _rows(F.linear, "linear")
