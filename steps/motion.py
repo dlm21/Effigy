@@ -80,6 +80,9 @@ def _model(device: str):
     if "model" not in MODEL:
         from kimodo.model.load_model import load_model
 
+        from tools.download_models import pin_refs
+
+        pin_refs()  # an install from before pin_refs: Kimodo looks its repos up by id, offline (server/jobs.py)
         os.environ["TEXT_ENCODER_DEVICE"] = device  # read by Kimodo when the encoder loads
         progress(0.05, f"loading the motion model and its text encoder (on the {device.upper()})")
         try:

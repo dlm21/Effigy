@@ -276,18 +276,6 @@ def test_linux_amd_environments_get_amds_torch(monkeypatch, tmp_path):
     )  # no uv to ask: not a reason to rebuild it
 
 
-def test_amd_refuses_parallax_layers_before_the_download(monkeypatch):
-    """MoGe-3's Triton kernels hung an RX 7900 XTX: Setup refuses the group on AMD, NVIDIA keeps it."""
-    monkeypatch.setattr(install, "too_big", lambda g: None)
-    monkeypatch.setattr(install.gpu_amd, "active", lambda: True)
-    with pytest.raises(ApiError) as e:
-        install.install("layers")
-    assert e.value.status == 409 and e.value.code == "unsupported"
-    assert all("layers" not in p["groups"] for p in install.presets())
-    monkeypatch.setattr(install.gpu_amd, "active", lambda: False)
-    assert install.amd_refuses("layers") is None
-
-
 def test_progress_counts_the_parts_being_written(fake):
     mod, _, _ = fake
     entry = models.entries()[0]
@@ -376,3 +364,13 @@ def test_a_failed_settings_write_puts_the_models_back(tmp_path, monkeypatch):
     install._move(job, old, new)
     assert job.status == "failed" and "disk full" in job.error["message"]
     assert (old / "Fx" / "w.bin").read_bytes() == GOOD and not new.exists()
+
+
+def test_pin_refs_lets_an_offline_lookup_by_id_find_the_pinned_snapshot(tmp_path, monkeypatch):
+    monkeypatch.setenv("HF_HUB_CACHE", str(tmp_path))
+    (_, repo, revision, _, _), (_, absent, *_) = [r for r in dm.PINNED if r[3] is None][:2]
+    entry = tmp_path / f"models--{repo.replace('/', '--')}"
+    (entry / "snapshots" / revision).mkdir(parents=True)
+    dm.pin_refs()
+    assert (entry / "refs" / "main").read_text() == revision
+    assert not (tmp_path / f"models--{absent.replace('/', '--')}").exists()  # not installed

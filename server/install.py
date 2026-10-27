@@ -226,16 +226,6 @@ def environments() -> list[dict]:
     return out
 
 
-# what an AMD card cannot run yet, whatever its memory: refused before the download (steps/depth.py has the why)
-AMD_UNSUPPORTED = {
-    "layers": "Parallax layers are not supported on AMD GPUs yet: MoGe-3's Triton kernels hang the card",
-}
-
-
-def amd_refuses(group: str) -> str | None:
-    return AMD_UNSUPPORTED.get(group) if gpu_amd.active() else None
-
-
 def too_big(group: str) -> str | None:
     """M46c: why this card cannot use `group` (presets.GROUP_NEED), or None. No NVIDIA card known: None (the
     machine check says so on its own)."""
@@ -256,7 +246,7 @@ def presets() -> list[dict]:
     leaves out what this card cannot use (M46c)."""
     out = []
     for key, name, what, groups in PRESETS:
-        groups = [g for g in groups if not too_big(g) and not amd_refuses(g)]
+        groups = [g for g in groups if not too_big(g)]
         rows = [models.state(e) for e in models.entries() if set(e["groups"]) & set(groups)]
         want, have = sum(r["want"] for r in rows), sum(r["have"] for r in rows)
         out.append(
@@ -279,8 +269,6 @@ def install(group: str, repair: bool = False) -> jobs.Job:
         )
     if why := too_big(group):  # M46c: a 6.7 GB download this card could never run
         raise ApiError(409, "oom", why)
-    if why := amd_refuses(group):
-        raise ApiError(409, "unsupported", why)
     from server.storage import _drive  # the drive or mount point, even before the folder exists
 
     with _asking:  # two requests for one group at once: one job

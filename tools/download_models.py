@@ -391,6 +391,17 @@ def fetch(url: str, sha256: str, dest: Path) -> None:
     dest.write_bytes(data)
 
 
+def pin_refs() -> None:
+    """refs/main → the pinned revision for each HF-cache repo whose snapshot is there: a download at a revision
+    writes none, and an offline lookup by id alone (Kimodo's, LLM2Vec's) needs it."""
+    hub = Path(os.environ["HF_HUB_CACHE"])
+    for _, repo, revision, folder, _ in PINNED:
+        entry = hub / f"models--{repo.replace('/', '--')}"
+        if folder is None and (entry / "snapshots" / revision).is_dir():
+            (entry / "refs").mkdir(exist_ok=True)
+            (entry / "refs" / "main").write_text(revision)
+
+
 def main(groups: list[str]) -> int:
     from huggingface_hub import snapshot_download
     from huggingface_hub.errors import GatedRepoError
@@ -412,6 +423,7 @@ def main(groups: list[str]) -> int:
                 f"  gated: accept the licence at https://huggingface.co/{repo}, run `hf auth login`, retry"
             )
             failed.append(repo)
+    pin_refs()
     for group, url, sha256, path in FILES:
         if not groups or group in groups:
             print(f"{url} -> {MODELS / path}", flush=True)

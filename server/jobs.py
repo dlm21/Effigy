@@ -200,7 +200,10 @@ def _spawn(step: str, *args: str, stdin=None, budget: float | None = None) -> su
     return subprocess.Popen(
         cmd,
         cwd=ROOT,
-        env=_env(budget),
+        # a step loads from the cache only: diffusers and transformers otherwise ask huggingface.co about the
+        # model on every load, with the user's token (Kimodo's, unpinned: one per file, could update it; tools.download_models.pin_refs keeps it working offline).
+        # Setup's downloads and login check run in their own processes (server/install.py, server/hf.py)
+        env=_env(budget) | {"HF_HUB_OFFLINE": "1"},
         stdin=stdin,
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,

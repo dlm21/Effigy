@@ -622,3 +622,14 @@ def test_a_resident_request_carries_the_budget_and_the_worker_caps_itself(monkey
     monkeypatch.setattr(_common, "_out", io.StringIO())
     assert _common._serve(lambda op, i, o, p: {"outputs": {}}) == 0
     assert fractions == [0.5]  # the second request, without a budget, keeps the cap
+
+
+def test_steps_run_offline_and_setup_does_not(monkeypatch):
+    seen = {}
+    monkeypatch.delenv("HF_HUB_OFFLINE", raising=False)  # a shell that set it
+    monkeypatch.setattr(jobs, "_pin_gpu", dict)  # no GPU query (its own subprocess)
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **k: seen.update(k["env"]))
+    jobs._spawn("_echo")
+    assert seen["HF_HUB_OFFLINE"] == "1"  # a step loads models from the cache only
+    # Setup's downloads and login check (install.py, hf.py) run with this one
+    assert "HF_HUB_OFFLINE" not in jobs._env()
