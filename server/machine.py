@@ -324,6 +324,9 @@ def port_free(port: int) -> bool:
     except OSError:
         pass
     with socket.socket() as s:
+        # as uvicorn binds: the last run's closed connections (TIME-WAIT) do not block it
+        if os.name != "nt":
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
         try:
             s.bind(("127.0.0.1", port))
             return True

@@ -209,7 +209,15 @@ def _creature(src: Path, out: Path, template: str, clips: list[str], yaw: float)
 def run(op, in_dir, out_dir, params):
     src, out = Path(in_dir or ""), Path(out_dir)
     if not in_dir or not (src / "rigged.glb").is_file():
-        raise StepError("missing_input", "anim needs a skinned version (Rig panel: Skin it)")
+        if in_dir and (src / "rigged_anim.glb").is_file():  # an anim or anim_edit version
+            raise StepError(
+                "missing_input",
+                f"{src.name} is already animated: add animations on its skinned model (Add or change "
+                "animations), ticking every one you want",
+            )
+        raise StepError(
+            "missing_input", "anim needs a skinned version (Character: Attach to skeleton)"
+        )
     skel = (
         json.loads((src / "skeleton.json").read_text(encoding="utf-8"))
         if (src / "skeleton.json").is_file()

@@ -512,8 +512,11 @@ On a person, **Keep the arms out of the body** (ticked) opens the arms just enou
 forearms or hands through the body, which happens on stout and stylised characters; untick it to keep the clips as
 they come.
 
-The animated model plays its clips from the view's **Animation** menu. A clip whose bones did not match says it
-**never moves**. The page names the clips whose arms were opened and by how much.
+The animated model opens when they are done and plays its clips from the view's **Animation** menu. A clip whose
+bones did not match says it **never moves**. The page names the clips whose arms were opened and by how much.
+
+**Add or change animations** on an animated model goes back to its skinned model. Tick every clip you want there:
+each **Add animations** makes a new animated model with just those, and edits made by hand stay on the old one.
 
 **Connect two clips** (on the animated model of a person): pick **From** and **To** among its clips, optionally say
 what happens in between (*turns and draws the sword*), the **Length** (0.5 to 8 seconds), and with a **To** clip its
