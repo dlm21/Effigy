@@ -38,6 +38,7 @@
 - {name: pipeline, kind: code, license: MIT, commercial: true, flag: "EasternJournalist/pipeline 1c51139, MoGe's helper"}
 - {name: o-voxel, kind: code, license: MIT, commercial: true, flag: "our sm_120 build of TRELLIS.2 o-voxel 75fbf01 + o-voxel-windows.patch (plyfile, GPL, removed)"}
 - {name: triton-windows, kind: code, license: MIT, commercial: true, flag: "FlexGEMM's Triton kernels on Windows; transitive via the wheels: tqdm (MIT/MPL-2.0), zstandard (BSD-3-Clause), filelock (Unlicense)"}
+- {name: triton, kind: code, license: MIT, commercial: true, flag: "AMD's ROCm build (repo.radeon.com, 3.5.1+rocm7.2.4), .venv-ml on Linux + AMD only (requirements-ml-rocm.txt): torch's and FlexGEMM's Triton"}
 
 # --- vendored engine code ---
 - {name: microsoft/TRELLIS.2, kind: code, license: MIT, commercial: true}

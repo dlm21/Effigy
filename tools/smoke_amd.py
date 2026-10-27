@@ -1,4 +1,4 @@
-"""Smoke test of Effigy's three GPU kernel libraries (CuMesh, o_voxel, FlexGEMM) built for HIP/gfx1201.
+"""Smoke test of Effigy's three GPU kernel libraries (CuMesh, o_voxel, FlexGEMM) built for HIP (gfx1201; gfx1100 on Linux).
 
 Every check compares the GPU result against an independent reference, not just "it ran".
 """
@@ -134,9 +134,12 @@ def test_flex_gemm():
     from flex_gemm.ops.spconv import Algorithm
     from flex_gemm.ops.spconv.submanifold_conv3d import sparse_submanifold_conv3d
 
-    check(
-        "flex_gemm imports without Triton", flex_gemm.kernels.triton is None, "(explicit_gemm path)"
-    )
+    if sys.platform == "win32":  # Linux's ROCm torch brings Triton along
+        check(
+            "flex_gemm imports without Triton",
+            flex_gemm.kernels.triton is None,
+            "(explicit_gemm path)",
+        )
     spconv.set_algorithm(Algorithm.EXPLICIT_GEMM)
 
     g = torch.Generator().manual_seed(2)

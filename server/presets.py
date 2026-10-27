@@ -2,6 +2,7 @@
 best preset a card fits (M46b)."""
 
 import os
+from pathlib import Path
 
 PRESETS = {
     "trellis2": {
@@ -141,8 +142,13 @@ def ram_need(step: str, params: dict) -> float | None:
     return RAM_GB.get(step)
 
 
+MEMINFO = Path("/proc/meminfo")
+
+
 def ram_gb() -> tuple[float, float]:
-    """(total, free) GB of host RAM."""
+    """(total, free) GB of host RAM. Free counts what the OS hands back on demand: Windows' standby list (the
+    available figure), Linux's page cache (MemAvailable; MemFree left the cache out, and a model loaded from disk
+    fills it)."""
     if os.name == "nt":
         import ctypes
 
@@ -156,8 +162,11 @@ def ram_gb() -> tuple[float, float]:
         s.length = ctypes.sizeof(Status)
         ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(s))
         return s.total / 2**30, s.free / 2**30
-    page = os.sysconf("SC_PAGE_SIZE")
-    return page * os.sysconf("SC_PHYS_PAGES") / 2**30, page * os.sysconf("SC_AVPHYS_PAGES") / 2**30
+    kib = {
+        k: int(v.split()[0])
+        for k, v in (line.split(":") for line in MEMINFO.read_text().splitlines())
+    }
+    return kib["MemTotal"] / 2**20, kib.get("MemAvailable", kib["MemFree"]) / 2**20
 
 
 def variant(step: str, params: dict):

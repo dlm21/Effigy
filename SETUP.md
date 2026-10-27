@@ -261,3 +261,4 @@ same, run inside `C:\Effigy`. Update with `git pull`, then `run.bat`. Build the 
 
 **AMD GPU (RX 9070 / 9070 XT):** the same `run.bat`, which sets up the AMD (ROCm) environment by itself;
 the Fast chain only: [docs/howto/amd-rocm-windows.md](docs/howto/amd-rocm-windows.md).
+On Linux (RX 7900 / RX 9070, ROCm 7.2.4): `./run.sh`, [docs/howto/amd-rocm-linux.md](docs/howto/amd-rocm-linux.md).

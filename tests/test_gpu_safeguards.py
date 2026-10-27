@@ -399,10 +399,62 @@ def test_amd_gpu_without_nvidia_smi(monkeypatch):
     assert machine._gpu() == ("AMD Radeon RX 9070 XT", 16304.0 / 1024, "32.0.22042.14002")
     assert jobs.gpu_amd.active() and jobs.gpu_amd.rocm_fits()  # run.bat: the ROCm .venv-ml
     assert "backend:native" in jobs._env()["PYTORCH_CUDA_ALLOC_CONF"]
-    monkeypatch.setitem(card, "name", "AMD Radeon RX 7900 XTX")
-    assert not jobs.gpu_amd.rocm_fits()  # wheels/rocm is gfx1201 only
+    monkeypatch.setitem(card, "name", "AMD Radeon RX 7800 XT")
+    assert not jobs.gpu_amd.rocm_fits()  # wheels/rocm: gfx1201, and gfx1100 on Linux; not gfx1101
     driver = next(i for i in machine.check() if i["id"] == "driver")
     assert driver["level"] == "ok"
+
+
+def test_amd_gpu_on_linux_from_sysfs(monkeypatch, tmp_path):
+    """Linux: the card with the most VRAM (not the iGPU), named from libdrm's amdgpu.ids; VRAM in use read live."""
+
+    def card(n, device, revision, total, used, vendor="0x1002"):
+        d = tmp_path / f"card{n}" / "device"
+        d.mkdir(parents=True)
+        for f, v in (("vendor", vendor), ("device", device), ("revision", revision)):
+            (d / f).write_text(v + "\n")
+        if total is not None:
+            (d / "mem_info_vram_total").write_text(str(total))
+            (d / "mem_info_vram_used").write_text(str(used))
+
+    card(0, "0x13c0", "0xcb", 2**31, 2**24)  # the Radeon 610M iGPU
+    card(1, "0x744c", "0xc8", 24560 * 2**20, 3600 * 2**20)
+    card(2, "0x2c02", "0xa1", 32 * 2**30, 0, vendor="0x10de")  # not AMD
+    card(3, "0x1234", "0x00", None, None)  # no VRAM files: skipped
+    ids = tmp_path / "amdgpu.ids"
+    ids.write_text(
+        "# a comment, with a comma\n744C,\tC8,\tAMD Radeon RX 7900 XTX\n13C0,\tCB,\tAMD Radeon 610M\n"
+    )
+    monkeypatch.setattr(jobs.gpu_amd, "DRM", tmp_path)
+    monkeypatch.setattr(jobs.gpu_amd, "IDS", ids)
+    g = jobs.gpu_amd._sysfs()
+    assert (g["name"], g["total_mib"]) == ("AMD Radeon RX 7900 XTX", 24560.0)
+    monkeypatch.setattr(jobs.gpu_amd, "adapter", lambda: g)
+    assert jobs.gpu_amd.used_mib() == 3600.0
+    (tmp_path / "card1/device/revision").write_text(
+        "0xcc\n"
+    )  # a revision the file doesn't list yet
+    assert jobs.gpu_amd._sysfs()["name"] == "AMD Radeon RX 7900 XTX"
+    monkeypatch.setattr(jobs.gpu_amd, "IDS", tmp_path / "missing.ids")
+    assert jobs.gpu_amd._sysfs()["name"] == "AMD GPU 744C,CC"
+    (tmp_path / "card1/device/mem_info_vram_used").unlink()
+    assert jobs.gpu_amd.used_mib() is None
+    # the HIP wheels: gfx1201 on Windows, gfx1100 and gfx1201 on Linux
+    assert jobs.gpu_amd.ROCM_CARDS == {"nt": ("RX 9070",), "posix": ("RX 7900", "RX 9070")}
+
+
+def test_ram_on_linux_counts_the_page_cache(monkeypatch, tmp_path):
+    """Free RAM is MemAvailable (what a model load can get back from the page cache), MemFree on old kernels."""
+    meminfo = tmp_path / "meminfo"
+    meminfo.write_text(
+        "MemTotal: 62914560 kB\nMemFree: 8388608 kB\nMemAvailable: 47185920 kB\nHugePages_Total: 0\n"
+    )
+    monkeypatch.setattr(presets, "MEMINFO", meminfo)
+    if sys.platform == "win32":
+        pytest.skip("Windows asks GlobalMemoryStatusEx")
+    assert presets.ram_gb() == (60.0, 45.0)
+    meminfo.write_text("MemTotal: 62914560 kB\nMemFree: 8388608 kB\n")
+    assert presets.ram_gb() == (60.0, 8.0)
 
 
 def test_failing_nvidia_smi_never_reports_an_amd_igpu(monkeypatch):

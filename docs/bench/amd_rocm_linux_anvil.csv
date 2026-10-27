@@ -1,0 +1,9 @@
+# commit: 1c4cd46f4a722efeb1004e3479da550f400ba40c
+# gpu, driver: AMD Radeon RX 7900 XTX, 7.3.0-5-cachyos
+# torch: 2.9.1+rocm7.2.4.git39497456
+# blender: Blender 5.2.2 LTS
+# host: Linux-7.3.0-5-cachyos-x86_64-with-glibc2.44
+# preset: game-prop, weights: fast
+# date: 2026-10-26 20:03:50
+image,asset,ok,failed_step,error,s_prep,vram_prep,torch_prep,s_trellis2,vram_trellis2,torch_trellis2,s_clean,vram_clean,torch_clean,s_remesh,vram_remesh,torch_remesh,s_uv,vram_uv,torch_uv,s_bake,vram_bake,torch_bake,s_validate,vram_validate,torch_validate,trellis2_seed,faces,non_manifold_edges,components,texel_p10,texel_p90,checklist_fails,export,s_export
+anvil.png,anvil_3,True,,,4.5,4.6,,146.9,20.0,4.74,10.0,3.26,,3.0,3.19,,2.0,3.12,,11.5,8.3,,1.0,2.07,,889896824,9656,0,1,0.943,1.059,0,anvil_3/009_export,1.5
