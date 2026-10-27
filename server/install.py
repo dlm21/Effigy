@@ -100,6 +100,90 @@ def _rocm(venv: str) -> bool:
     return venv == ".venv-ml" and gpu_amd.rocm_fits()
 
 
+_RADEON = "https://repo.radeon.com/rocm/manylinux/rocm-rel-7.2.4/"
+_TORCH_29 = [
+    "torch-2.9.1%2Brocm7.2.4.lw.git39497456-cp312-cp312-linux_x86_64.whl",
+    "torchvision-0.24.0%2Brocm7.2.4.gitb919bd0c-cp312-cp312-linux_x86_64.whl",
+    "triton-3.5.1%2Brocm7.2.4.gita272dfa8-cp312-cp312-linux_x86_64.whl",
+]
+# Linux + AMD: the other environments get uv.lock's packages with AMD's torch in place of CUDA's (the lock's 2.8
+# → 2.9.1, as .venv-ml; GEM-X's 2.10 → 2.10)
+ROCM_TORCH = {
+    ".venv-skin": _TORCH_29,
+    ".venv-kimodo": _TORCH_29,
+    ".venv-parts": _TORCH_29,
+    ".venv-moge": _TORCH_29,
+    ".venv-gemx": [
+        "torch-2.10.0%2Brocm7.2.4.lw.git3d3aa833-cp312-cp312-linux_x86_64.whl",
+        "torchvision-0.25.0%2Brocm7.2.4.git82df5f59-cp312-cp312-linux_x86_64.whl",
+        "triton-3.6.0%2Brocm7.2.4.git4ed88892-cp312-cp312-linux_x86_64.whl",
+    ],
+}
+_CUDA_ONLY = ("torch==", "torchvision==", "triton==", "nvidia-")
+
+
+def _rocm_lock(venv: str) -> bool:
+    """Linux + AMD: `venv` is installed by _rocm_requirements, not by uv sync."""
+    return os.name != "nt" and venv in ROCM_TORCH and gpu_amd.rocm_fits()
+
+
+def _rocm_requirements(venv: str) -> str:
+    """What uv sync installs (the project's own packages, the default dev group and this group) as uv.lock pins
+    them, without CUDA torch and its nvidia-* libraries, plus AMD's torch: installed with --no-deps, so nothing
+    else moves."""
+    out = subprocess.run(
+        [jobs.uv(), "export", "--frozen", "--group", jobs.VENV_GROUP[venv]]
+        + ["--no-hashes", "--no-header", "--no-annotate"],
+        cwd=ROOT,
+        env=_uv_env(venv),
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=True,
+    ).stdout.splitlines()
+    keep = [
+        str(ROOT / r[2:]) if r.startswith("./") else r for r in out if not r.startswith(_CUDA_ONLY)
+    ]
+    return "\n".join(keep + [_RADEON + w for w in ROCM_TORCH[venv]]) + "\n"
+
+
+def _rocm_record(venv: str) -> Path:
+    return jobs.venv_python(venv).parents[1] / "rocm-requirements.txt"
+
+
+def _rocm_install(job: jobs.Job, venv: str, reinstall: bool = False) -> None:
+    """`venv` made exactly _rocm_requirements by uv pip sync (what the list lacks goes, a CUDA build's nvidia-*
+    too; what it keeps stays, so a lock bump downloads only what changed). The list becomes the record venv_state
+    compares only once the sync succeeded: a cancelled, failed or killed install stays outdated."""
+    record, env = _rocm_record(venv), _uv_env(venv)
+    record.unlink(missing_ok=True)
+    try:
+        reqs = _rocm_requirements(venv)
+    except (OSError, subprocess.SubprocessError) as e:
+        raise _Failed("failed", f"{venv}: uv export failed: {e}") from e
+    new = record.with_name("rocm-requirements.new.txt")
+    sync = [
+        jobs.uv(),
+        "pip",
+        "sync",
+        "--python",
+        venv,
+        *(["--reinstall"] if reinstall else []),
+        str(new),
+    ]
+    if jobs.venv_python(venv).is_file():
+        cmds = [sync]
+    else:
+        cmds = [[jobs.uv(), "venv", "--python", "3.12", venv], sync]
+    for cmd in cmds:
+        if cmd is sync:
+            new.write_text(reqs, encoding="utf-8")  # in the venv: `uv venv` makes the folder
+        rc, lines = _cmd(job, cmd, env)
+        if rc:
+            raise _Failed("failed", f"{venv}: {lines[-1] if lines else f'uv exited {rc}'}")
+    new.replace(record)
+
+
 def venv_state(venv: str) -> str:
     """ok, missing, outdated (packages differ from uv.lock), installing, or unknown (no uv to ask)."""
     if venv in _syncing:
@@ -108,6 +192,15 @@ def venv_state(venv: str) -> str:
         return "missing"
     if _rocm(venv):
         return "ok"
+    if _rocm_lock(venv):
+        try:
+            done = _rocm_record(venv).read_text(encoding="utf-8")
+        except OSError:
+            return "outdated"  # uv sync's CUDA build, or an install that didn't finish
+        try:
+            return "ok" if done == _rocm_requirements(venv) else "outdated"
+        except (OSError, subprocess.SubprocessError):
+            return "unknown"  # no uv to ask
     try:  # 80 ms: compares the installed packages with the lock, changes nothing
         r = subprocess.run(
             _sync_cmd(venv, "--check"),
@@ -133,6 +226,16 @@ def environments() -> list[dict]:
     return out
 
 
+# what an AMD card cannot run yet, whatever its memory: refused before the download (steps/depth.py has the why)
+AMD_UNSUPPORTED = {
+    "layers": "Parallax layers are not supported on AMD GPUs yet: MoGe-3's Triton kernels hang the card",
+}
+
+
+def amd_refuses(group: str) -> str | None:
+    return AMD_UNSUPPORTED.get(group) if gpu_amd.active() else None
+
+
 def too_big(group: str) -> str | None:
     """M46c: why this card cannot use `group` (presets.GROUP_NEED), or None. No NVIDIA card known: None (the
     machine check says so on its own)."""
@@ -153,7 +256,7 @@ def presets() -> list[dict]:
     leaves out what this card cannot use (M46c)."""
     out = []
     for key, name, what, groups in PRESETS:
-        groups = [g for g in groups if not too_big(g)]
+        groups = [g for g in groups if not too_big(g) and not amd_refuses(g)]
         rows = [models.state(e) for e in models.entries() if set(e["groups"]) & set(groups)]
         want, have = sum(r["want"] for r in rows), sum(r["have"] for r in rows)
         out.append(
@@ -176,6 +279,8 @@ def install(group: str, repair: bool = False) -> jobs.Job:
         )
     if why := too_big(group):  # M46c: a 6.7 GB download this card could never run
         raise ApiError(409, "oom", why)
+    if why := amd_refuses(group):
+        raise ApiError(409, "unsupported", why)
     from server.storage import _drive  # the drive or mount point, even before the folder exists
 
     with _asking:  # two requests for one group at once: one job
@@ -313,13 +418,19 @@ def _environment(job: jobs.Job, venv: str, deep: bool) -> None:
     with _gpu(job):
         _syncing.add(venv)
         try:
-            if state in ("missing", "outdated"):
+            if state in ("missing", "outdated") and _rocm_lock(venv):
+                _rocm_install(job, venv)
+            elif state in ("missing", "outdated"):
                 rc, lines = _cmd(job, _sync_cmd(venv), _uv_env(venv))
                 if rc:
                     raise _Failed("failed", f"{venv}: {lines[-1] if lines else f'uv exited {rc}'}")
             if deep and not _imports(job, venv):
                 _say(job, None, f"Reinstalling the packages of {venv}")
-                rc, lines = _cmd(job, _sync_cmd(venv, "--reinstall"), _uv_env(venv))
+                rc = 0
+                if _rocm_lock(venv):
+                    _rocm_install(job, venv, reinstall=True)  # raises when uv fails
+                else:
+                    rc, _ = _cmd(job, _sync_cmd(venv, "--reinstall"), _uv_env(venv))
                 if rc or not _imports(job, venv):
                     raise _Failed(
                         "failed",

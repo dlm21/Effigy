@@ -273,7 +273,7 @@ you can't ship) is in [docs/PLAN.md §6](docs/PLAN.md#6-licence-policy).
 | | |
 |---|---|
 | **GPU** | An NVIDIA card with 16 GB (the reference is an RTX 5080 Laptop; 12 GB works for the *Fast* engine, best effort). The bundled CUDA kernels are built for the RTX 40 and 50 series; older cards need a rebuild (`.github/workflows/wheels.yml`). |
-| **AMD GPU** | An AMD Radeon RX 9070 or 9070 XT runs the *Fast* chain end to end, about as fast as the reference laptop ([bench](docs/bench/amd-rocm.md)). `run.bat` sees the card and installs the AMD (ROCm) environment by itself ([how-to](docs/howto/amd-rocm-windows.md)). On Linux an RX 7900 XTX runs it too, with `run.sh` and the system's ROCm ([how-to](docs/howto/amd-rocm-linux.md)). Not on AMD yet: *Faithful*, the character chain, motion from text or video, and other AMD cards. |
+| **AMD GPU** | An AMD Radeon RX 9070 or 9070 XT runs the *Fast* chain end to end, about as fast as the reference laptop ([bench](docs/bench/amd-rocm.md)). `run.bat` sees the card and installs the AMD (ROCm) environment by itself ([how-to](docs/howto/amd-rocm-windows.md)). On Linux an RX 7900 XTX runs everything but parallax layers (*Fast* and *Faithful*, characters, parts, motion from text and video), with `run.sh` and the system's ROCm ([how-to](docs/howto/amd-rocm-linux.md)). Not on AMD yet: parallax layers; on Windows also *Faithful*, the character chain and motion; other AMD cards. |
 | **OS** | Windows 11, driver 575 or newer. Linux runs from source with the same `uv sync`, but the three kernel wheels are Windows builds: bring your own. |
 | **Disk** | 70–160 GB, mostly models; they can live on another drive. |
 | **RAM** | 32 GB recommended: the 3D engines peak at ~20 GB of host memory. |

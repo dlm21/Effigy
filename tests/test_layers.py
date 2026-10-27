@@ -3,6 +3,7 @@ the Godot Parallax2D and Paper2D exports, validate's items, and the layers step 
 models' run is in docs/bench/m55.md."""
 
 import json
+import sys
 from types import SimpleNamespace
 
 import numpy as np
@@ -186,3 +187,16 @@ def test_the_layers_step_draws_what_the_nearer_bands_hide(tmp_path, monkeypatch)
     assert far[100, 10, 1] == 200  # behind the street: drawn in
     assert near[10, 10, 3] == 0 and near[110, 10, 3] == 255  # the nearest: only its band
     assert res["metrics"]["count"] == 4 and res["metrics"]["scroll_scales"][-1] == 1
+
+
+def test_depth_refuses_on_amd_before_loading_anything(tmp_path, monkeypatch):
+    """MoGe-3's FlexGEMM Triton kernels hung an RX 7900 XTX (ROCm 7.2.4) and froze its desktop: refused at once."""
+    (tmp_path / "meta.json").write_text(
+        json.dumps({"version": "001_concepts", "outputs": {"image": "i.png"}})
+    )
+    monkeypatch.setitem(
+        sys.modules, "torch", SimpleNamespace(version=SimpleNamespace(hip="7.2.53211"))
+    )
+    with pytest.raises(StepError) as e:
+        depth.run("run", str(tmp_path), str(tmp_path / "out"), {})
+    assert e.value.code == "failed" and "AMD" in str(e.value)

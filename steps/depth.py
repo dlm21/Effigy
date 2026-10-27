@@ -48,6 +48,14 @@ def run(op, in_dir, out_dir, params):
     if key not in outs:
         raise StepError("missing_input", f"{meta['version']} has no picture {key!r}")
     import torch
+
+    if torch.version.hip:
+        # MoGe-3's sparse U-Net runs on FlexGEMM's Triton kernels (b2fadb2, no other path): on an RX 7900 XTX
+        # (ROCm 7.2.4) one hung the GPU ("HW Exception ... GPU Hang") and froze the desktop it also drives
+        raise StepError(
+            "failed",
+            "depth (MoGe-3) is not supported on AMD GPUs yet: its Triton kernels hang the card",
+        )
     from huggingface_hub import hf_hub_download
     from huggingface_hub.errors import LocalEntryNotFoundError
 

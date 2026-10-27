@@ -78,7 +78,7 @@
 - {name: hydra-colorlog, kind: code, license: MIT, commercial: true, flag: "GEM-X's Hydra configs"}
 - {name: rich, kind: code, license: MIT, commercial: true, flag: "GEM-X's logging"}
 - {name: imageio, kind: code, license: BSD-2-Clause, commercial: true, flag: "GEM-X reads the clip through it (PyAV plugin)"}
-- {name: av, kind: code, license: BSD-3-Clause, commercial: true, flag: "PyAV: GEM-X's video reading"}
+- {name: av, kind: code, license: BSD-3-Clause, commercial: true, flag: "PyAV: GEM-X's video reading, and mocap's preview.mp4 written with its libvpx-vp9 (BSD-3); its wheel's FFmpeg also carries GPL parts (x264), never called, never shipped: the preview is the UI's, not a game asset"}
 - {name: ffmpeg-python, kind: code, license: Apache-2.0, commercial: true, flag: "imported by GEM-X's video helpers; the ones the step calls read through PyAV, so no ffmpeg program is needed"}
 - {name: huggingface-hub, kind: code, license: Apache-2.0, commercial: true}
 - {name: safetensors, kind: code, license: Apache-2.0, commercial: true}

@@ -1,5 +1,7 @@
 """AMD: steps/_rocm.py computes big products a block of rows at a time, with the same result."""
 
+import sys
+
 import pytest
 
 torch = pytest.importorskip("torch")
@@ -64,5 +66,23 @@ def test_other_shapes_pass_through(small_blocks):
 
 
 def test_install_is_lazy_and_noop_without_hip():
-    _rocm.install()  # torch is imported here already: patches now, or nothing on CUDA/CPU builds
-    assert getattr(torch.matmul, "effigy_rows", False) == bool(torch.version.hip)
+    _rocm.install()  # torch is imported here already: patches now, or nothing on CUDA/CPU builds and on Linux
+    want = bool(torch.version.hip) and sys.platform == "win32"
+    assert getattr(torch.matmul, "effigy_rows", False) == want
+
+
+def test_rows_only_on_windows(monkeypatch):
+    """The wrong big GEMMs were measured on Windows ROCm; on Linux they were right and the wrapped torch.matmul broke
+    torch.jit.script (Kimodo), so Linux keeps torch's own."""
+    F = torch.nn.functional
+    targets = [(F, "linear"), (torch, "matmul"), (torch, "mm"), (torch, "addmm")]
+    targets += [(torch.Tensor, n) for n in ("__matmul__", "matmul", "mm")]
+    for obj, name in targets:  # put back whatever _patch replaces
+        monkeypatch.setattr(obj, name, getattr(obj, name))
+    monkeypatch.setattr(torch.version, "hip", "7.2.53211")
+    monkeypatch.setattr(_rocm.sys, "platform", "linux")
+    _rocm._patch()
+    assert not getattr(torch.matmul, "effigy_rows", False)
+    monkeypatch.setattr(_rocm.sys, "platform", "win32")
+    _rocm._patch()
+    assert torch.matmul.effigy_rows and F.linear.effigy_rows

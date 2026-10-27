@@ -4,6 +4,7 @@ feature on a fake models folder: its environment set up, damaged files fetched a
 import hashlib
 import json
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -204,6 +205,87 @@ def test_environment_state_asks_uv(monkeypatch, tmp_path):
     assert {r["name"] for r in rows} >= {".venv-ml", ".venv-kimodo", ".venv-gemx"}
     assert "mocap" in next(r for r in rows if r["name"] == ".venv-gemx")["groups"]
     assert json.dumps(rows)
+
+
+def test_linux_amd_environments_get_amds_torch(monkeypatch, tmp_path):
+    """Linux + AMD: the lock's packages without CUDA torch and nvidia-*, AMD's torch instead; ok once the record
+    matches what the lock asks for now."""
+    export = [
+        "./wheels/geosam2-0.1.0-py3-none-any.whl ; sys_platform == 'linux'",
+        "nvidia-cublas-cu12==12.8.4.1 ; sys_platform == 'linux'",
+        "numpy==2.3.0",
+        "torch==2.8.0+cu128 ; sys_platform == 'linux'",
+        "torchvision==0.23.0+cu128",
+        "triton==3.4.0 ; sys_platform == 'linux'",
+        "torchmetrics==1.9.0",
+    ]
+    run = lambda *a, **k: subprocess.CompletedProcess(a, 0, "\n".join(export) + "\n", "")
+    monkeypatch.setattr(install.subprocess, "run", run)
+    monkeypatch.setattr(install.gpu_amd, "rocm_fits", lambda: True)
+    monkeypatch.setattr(jobs, "venv_python", lambda venv: tmp_path / venv / "bin" / "python")
+    if os.name == "nt":
+        assert not install._rocm_lock(".venv-parts")  # Windows: no AMD build of these yet
+        return
+    reqs = install._rocm_requirements(".venv-parts").splitlines()
+    assert reqs[:3] == [
+        f"{install.ROOT / 'wheels/geosam2-0.1.0-py3-none-any.whl'} ; sys_platform == 'linux'",
+        "numpy==2.3.0",
+        "torchmetrics==1.9.0",
+    ]
+    assert [r.rsplit("/", 1)[1].split("%2B")[0] for r in reqs[3:]] == [
+        "torch-2.9.1",
+        "torchvision-0.24.0",
+        "triton-3.5.1",
+    ]
+    assert "torch-2.10.0" in install._rocm_requirements(".venv-gemx")
+    (tmp_path / ".venv-parts" / "bin").mkdir(parents=True)
+    (tmp_path / ".venv-parts" / "bin" / "python").write_text("")
+    assert install.venv_state(".venv-parts") == "outdated"  # uv sync's CUDA build: no record
+    install._rocm_record(".venv-parts").write_text(install._rocm_requirements(".venv-parts"))
+    assert install.venv_state(".venv-parts") == "ok"
+    export.append("einops==0.8.1")  # the lock moved on
+    assert install.venv_state(".venv-parts") == "outdated"
+    assert not install._rocm_lock(".venv-ml")  # run.sh's
+
+    # the install: uv pip sync onto the existing venv (no --clear), the record only once it succeeded
+    ran = []
+
+    def cmd(job, c, env=None):
+        ran.append(c)
+        if c[1:3] == ["pip", "sync"] and fail:
+            raise install._Failed("cancelled", "cancelled")  # what _cmd raises on a cancel
+        return 0, []
+
+    monkeypatch.setattr(install, "_cmd", cmd)
+    job = jobs.Job("", "_install", None, {})
+    fail = True
+    with pytest.raises(install._Failed):
+        install._rocm_install(job, ".venv-parts")
+    assert install.venv_state(".venv-parts") == "outdated"  # a cancelled install is not ok
+    fail, ran[:] = False, []
+    install._rocm_install(job, ".venv-parts")
+    assert [c[1:3] for c in ran] == [["pip", "sync"]]  # the venv was there: not made again
+    assert install.venv_state(".venv-parts") == "ok"
+
+    def no_uv(*a, **k):
+        raise FileNotFoundError("uv")
+
+    monkeypatch.setattr(install.subprocess, "run", no_uv)
+    assert (
+        install.venv_state(".venv-parts") == "unknown"
+    )  # no uv to ask: not a reason to rebuild it
+
+
+def test_amd_refuses_parallax_layers_before_the_download(monkeypatch):
+    """MoGe-3's Triton kernels hung an RX 7900 XTX: Setup refuses the group on AMD, NVIDIA keeps it."""
+    monkeypatch.setattr(install, "too_big", lambda g: None)
+    monkeypatch.setattr(install.gpu_amd, "active", lambda: True)
+    with pytest.raises(ApiError) as e:
+        install.install("layers")
+    assert e.value.status == 409 and e.value.code == "unsupported"
+    assert all("layers" not in p["groups"] for p in install.presets())
+    monkeypatch.setattr(install.gpu_amd, "active", lambda: False)
+    assert install.amd_refuses("layers") is None
 
 
 def test_progress_counts_the_parts_being_written(fake):

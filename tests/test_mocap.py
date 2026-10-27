@@ -285,7 +285,7 @@ def test_run_around_a_faked_gem_x(tmp_path, monkeypatch):
     monkeypatch.setattr(mocap, "prepare_video", lambda src, dst, s, e: (L, 64, 64))
     monkeypatch.setattr(mocap, "gem", fake_gem)
     monkeypatch.setattr(mocap, "skeleton", lambda i, s: (NAMES, PARENTS, BIND))
-    monkeypatch.setattr(mocap, "preview", lambda *a: None)
+    monkeypatch.setattr(mocap, "preview", lambda *a: True)
     monkeypatch.setattr(mocap, "run_blender", fake_blender)
     import steps.anim
 
@@ -295,3 +295,62 @@ def test_run_around_a_faked_gem_x(tmp_path, monkeypatch):
     assert res["metrics"]["name"] == "Walk 050" and res["outputs"]["clip"] == "clip.glb"
     assert (asset / "050_mocap" / "motion.bvh").read_text().startswith("HIERARCHY")
     assert "facebook/sam-3d-body" not in res["licenses"] and "nvidia/GEM-X" in res["licenses"]
+
+
+def test_soma_without_warp_forces_the_torch_paths(monkeypatch):
+    """AMD: NVIDIA Warp has no HIP backend, so SOMA's dense skinning and torch rotation fit, once however often
+    _engine runs (the resident worker)."""
+    import sys
+    import types
+
+    seen = []
+
+    class SOMALayer:
+        def __init__(
+            self, data_root, low_lod=False, device="cuda", identity_model_type="mhr", mode="warp"
+        ):
+            seen.append(("mode", mode))
+
+    class SkeletonTransfer:
+        def __init__(
+            self,
+            parents,
+            bind,
+            shape,
+            weights,
+            use_warp_for_rotations=True,
+            rotation_method="kabsch",
+        ):
+            seen.append(("rotations", use_warp_for_rotations))
+
+    pkg, geo = types.ModuleType("soma"), types.ModuleType("soma.geometry")
+    pkg.soma = types.SimpleNamespace(SOMALayer=SOMALayer)
+    geo.skeleton_transfer = types.SimpleNamespace(SkeletonTransfer=SkeletonTransfer)
+    pkg.geometry = geo
+    monkeypatch.setitem(sys.modules, "soma", pkg)
+    monkeypatch.setitem(sys.modules, "soma.geometry", geo)
+    mocap._soma_without_warp()
+    mocap._soma_without_warp()  # a second _engine(): not wrapped twice
+    SOMALayer("inputs", low_lod=True, device="cuda", identity_model_type="mhr", mode="warp")
+    SkeletonTransfer(0, 1, 2, 3, rotation_method="kabsch")
+    assert seen == [("mode", "dense"), ("rotations", False)]
+    inner = SOMALayer.__init__.__kwdefaults__[
+        "_init"
+    ]  # what the wrapper calls: the original, not a wrapper
+    assert SOMALayer.__init__.effigy_hip and not getattr(inner, "effigy_hip", False)
+
+
+def test_preview_is_vp9_in_mp4(tmp_path):
+    """Firefox and Chromium played no mp4v (MPEG-4 Part 2): the preview is VP9, PyAV's libvpx."""
+    av = pytest.importorskip("av", reason="PyAV is in .venv-gemx")
+    cv2 = pytest.importorskip("cv2")
+    src = tmp_path / "clip.mp4"
+    w = cv2.VideoWriter(str(src), cv2.VideoWriter_fourcc(*"mp4v"), 30, (64, 48))
+    for _ in range(6):
+        w.write(np.full((48, 64, 3), 128, np.uint8))
+    w.release()
+    kp, boxes = np.full((6, 77, 3), [32, 24, 0.9]), np.tile([8, 4, 56, 44], (6, 1))
+    assert mocap.preview(src, kp, boxes, tmp_path / "preview.mp4")
+    with av.open(str(tmp_path / "preview.mp4")) as f:
+        s = f.streams.video[0]
+        assert (s.codec_context.name, s.width, s.height, s.frames) == ("vp9", 64, 48, 6)

@@ -17,8 +17,10 @@ from pathlib import Path
 AMD = 0x1002
 DRM = Path("/sys/class/drm")
 IDS = Path("/usr/share/libdrm/amdgpu.ids")  # "744C,\tC8,\tAMD Radeon RX 7900 XTX"
-# the cards wheels/rocm has kernels for: gfx1201 on Windows; gfx1100 and gfx1201 on Linux
-ROCM_CARDS = {"nt": ("RX 9070",), "posix": ("RX 7900", "RX 9070")}
+KFD = Path("/sys/class/kfd/kfd/topology/nodes")  # ROCm numbers the GPUs in this order
+# the cards that run on ROCm: gfx1201 on Windows; gfx1100 on Linux. The Linux wheels have gfx1201 kernels too,
+# but the RX 9070 joins only once measured there: steps/_rocm.py's GEMM fix stays off on Linux, measured on gfx1100
+ROCM_CARDS = {"nt": ("RX 9070",), "posix": ("RX 7900",)}
 
 
 class _Desc1(ctypes.Structure):  # DXGI_ADAPTER_DESC1
@@ -98,9 +100,24 @@ def adapter() -> dict | None:
         return None
 
 
+def _hip_order() -> list[int]:
+    """The render minors (renderD128 → 128) of the GPUs in the order HIP numbers them: KFD's nodes with compute
+    units (node 0 is the CPU)."""
+    out = []
+    for node in sorted(KFD.glob("[0-9]*"), key=lambda p: int(p.name)):
+        try:
+            props = dict(line.split() for line in (node / "properties").read_text().splitlines())
+            if int(props.get("simd_count", 0)):
+                out.append(int(props["drm_render_minor"]))
+        except (OSError, ValueError, KeyError):
+            continue
+    return out
+
+
 def _sysfs() -> dict | None:
-    """Linux: adapter()'s answer from the amdgpu driver, `vram` the file used_mib() reads."""
-    found = []
+    """Linux: adapter()'s answer from the amdgpu driver, `vram` the file used_mib() reads, `hip` its HIP device
+    index (None if KFD doesn't list it): beside an AMD iGPU, HIP sees two GPUs."""
+    found, order = [], _hip_order()
     for dev in DRM.glob("card[0-9]*/device"):
         try:
             if int((dev / "vendor").read_text(), 16) != AMD:
@@ -119,12 +136,14 @@ def _sysfs() -> dict | None:
         exact = [
             n.strip() for d, r, n in rows if (d.strip().upper(), r.strip().upper()) == (device, rev)
         ]
+        minors = [int(r.name[7:]) for r in (dev / "drm").glob("renderD[0-9]*")]
         found.append(
             {
                 "name": (exact or names or [f"AMD GPU {device},{rev}"])[0],
                 "total_mib": total / 2**20,
                 "driver": platform.release(),  # amdgpu is in the kernel
                 "vram": str(dev / "mem_info_vram_used"),
+                "hip": next((order.index(m) for m in minors if m in order), None),
             }
         )
     return max(found, key=lambda g: g["total_mib"], default=None)
@@ -165,12 +184,20 @@ def used_mib() -> float | None:
 
 
 def smi(*fields: str) -> list[float | None] | None:
-    """jobs._smi's answer from the AMD card. None for "index": HIP numbers the devices its own way, so
-    jobs._pin_gpu leaves the choice to HIP."""
-    if "index" in fields or not (g := adapter()) or (used := used_mib()) is None:
+    """jobs._smi's answer from the AMD card. "index": its HIP device index on Linux, so jobs._pin_gpu keeps the
+    steps off an iGPU (HIP honours CUDA_VISIBLE_DEVICES; Kimodo's text encoder splits itself over every GPU it
+    sees and hung); None on Windows (DXGI's order isn't HIP's), and the choice stays HIP's."""
+    if not (g := adapter()) or (used := used_mib()) is None:
+        return None
+    if "index" in fields and g.get("hip") is None:
         return None
     total = g["total_mib"]
-    have = {"memory.total": total, "memory.used": used, "memory.free": total - used}
+    have = {
+        "memory.total": total,
+        "memory.used": used,
+        "memory.free": total - used,
+        "index": g.get("hip"),
+    }
     return [have.get(f) for f in fields]  # utilization.gpu: None
 
 

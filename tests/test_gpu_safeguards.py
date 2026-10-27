@@ -1,5 +1,6 @@
 """M45 GPU safeguards on the CPU: the VRAM table, the budget, the pre-flight, the OOM message, the cap."""
 
+import os
 import subprocess
 import sys
 import time
@@ -397,7 +398,8 @@ def test_amd_gpu_without_nvidia_smi(monkeypatch):
     assert jobs._smi("utilization.gpu", "memory.used") == [None, 3600.0]
     assert jobs._pin_gpu() == {}  # HIP numbers the devices itself
     assert machine._gpu() == ("AMD Radeon RX 9070 XT", 16304.0 / 1024, "32.0.22042.14002")
-    assert jobs.gpu_amd.active() and jobs.gpu_amd.rocm_fits()  # run.bat: the ROCm .venv-ml
+    # run.bat: the ROCm .venv-ml; Linux runs only the cards measured there (an RX 7900)
+    assert jobs.gpu_amd.active() and jobs.gpu_amd.rocm_fits() == (os.name == "nt")
     assert "backend:native" in jobs._env()["PYTORCH_CUDA_ALLOC_CONF"]
     monkeypatch.setitem(card, "name", "AMD Radeon RX 7800 XT")
     assert not jobs.gpu_amd.rocm_fits()  # wheels/rocm: gfx1201, and gfx1100 on Linux; not gfx1101
@@ -416,6 +418,13 @@ def test_amd_gpu_on_linux_from_sysfs(monkeypatch, tmp_path):
         if total is not None:
             (d / "mem_info_vram_total").write_text(str(total))
             (d / "mem_info_vram_used").write_text(str(used))
+        (d / "drm" / f"renderD{128 + n}").mkdir(parents=True)
+
+    def node(n, simd, minor):
+        (tmp_path / "kfd" / str(n)).mkdir(parents=True)
+        (tmp_path / "kfd" / str(n) / "properties").write_text(
+            f"cpu_cores_count 8\nsimd_count {simd}\ndrm_render_minor {minor}\n"
+        )
 
     card(0, "0x13c0", "0xcb", 2**31, 2**24)  # the Radeon 610M iGPU
     card(1, "0x744c", "0xc8", 24560 * 2**20, 3600 * 2**20)
@@ -427,10 +436,23 @@ def test_amd_gpu_on_linux_from_sysfs(monkeypatch, tmp_path):
     )
     monkeypatch.setattr(jobs.gpu_amd, "DRM", tmp_path)
     monkeypatch.setattr(jobs.gpu_amd, "IDS", ids)
+    monkeypatch.setattr(jobs.gpu_amd, "KFD", tmp_path / "kfd")
+    assert jobs.gpu_amd._sysfs()["hip"] is None  # no KFD: HIP's own choice
+    node(0, 0, 0)  # the CPU
+    node(1, 4, 128)  # HIP's device 0 here: the iGPU (card0, renderD128)
+    node(10, 192, 129)  # device 1: the 7900 XTX (card1); nodes sort as numbers
     g = jobs.gpu_amd._sysfs()
-    assert (g["name"], g["total_mib"]) == ("AMD Radeon RX 7900 XTX", 24560.0)
+    assert (g["name"], g["total_mib"], g["hip"]) == ("AMD Radeon RX 7900 XTX", 24560.0, 1)
     monkeypatch.setattr(jobs.gpu_amd, "adapter", lambda: g)
     assert jobs.gpu_amd.used_mib() == 3600.0
+    assert jobs.gpu_amd.smi("index") == [1]
+    monkeypatch.delenv("CUDA_VISIBLE_DEVICES", raising=False)
+    monkeypatch.setattr(
+        jobs.subprocess, "check_output", lambda *a, **k: (_ for _ in ()).throw(OSError())
+    )
+    assert jobs._pin_gpu()["CUDA_VISIBLE_DEVICES"] == "1"  # HIP honours it too
+    monkeypatch.setenv("HIP_VISIBLE_DEVICES", "0")
+    assert jobs._pin_gpu() == {}  # the user's own choice: ours would count its list wrong
     (tmp_path / "card1/device/revision").write_text(
         "0xcc\n"
     )  # a revision the file doesn't list yet
@@ -439,8 +461,8 @@ def test_amd_gpu_on_linux_from_sysfs(monkeypatch, tmp_path):
     assert jobs.gpu_amd._sysfs()["name"] == "AMD GPU 744C,CC"
     (tmp_path / "card1/device/mem_info_vram_used").unlink()
     assert jobs.gpu_amd.used_mib() is None
-    # the HIP wheels: gfx1201 on Windows, gfx1100 and gfx1201 on Linux
-    assert jobs.gpu_amd.ROCM_CARDS == {"nt": ("RX 9070",), "posix": ("RX 7900", "RX 9070")}
+    # gfx1201 on Windows, gfx1100 on Linux: the cards measured there (the GEMM fix is Windows-only)
+    assert jobs.gpu_amd.ROCM_CARDS == {"nt": ("RX 9070",), "posix": ("RX 7900",)}
 
 
 def test_ram_on_linux_counts_the_page_cache(monkeypatch, tmp_path):

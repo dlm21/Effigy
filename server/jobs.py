@@ -186,9 +186,11 @@ def _env(budget: float | None = None) -> dict:
 
 def _pin_gpu() -> dict:
     """M45: with several GPUs the steps run on the one with the most memory, the one the budget is for
-    (CUDA's own order is "fastest first", nvidia-smi's the PCI bus). A CUDA_VISIBLE_DEVICES set by the user wins.
+    (CUDA's own order is "fastest first", nvidia-smi's the PCI bus). A CUDA_VISIBLE_DEVICES set by the user wins, as
+    do AMD's HIP_ and ROCR_VISIBLE_DEVICES (HIP applies them before ours: our index would count the wrong list).
     ponytail: the budget is then still read from the biggest GPU."""
-    if "CUDA_VISIBLE_DEVICES" in os.environ or not (i := _smi("index")):
+    mine = ("CUDA_VISIBLE_DEVICES", "HIP_VISIBLE_DEVICES", "ROCR_VISIBLE_DEVICES")
+    if any(k in os.environ for k in mine) or not (i := _smi("index")):
         return {}
     return {"CUDA_DEVICE_ORDER": "PCI_BUS_ID", "CUDA_VISIBLE_DEVICES": str(int(i[0]))}
 

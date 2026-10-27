@@ -245,6 +245,29 @@ def _engine():
     sys.modules.setdefault("wandb", wandb)
     if str(ENGINE) not in sys.path:
         sys.path.insert(0, str(ENGINE))
+    if torch.version.hip:
+        _soma_without_warp()
+
+
+def _soma_without_warp():
+    """AMD: NVIDIA Warp has no HIP backend (wp.device_from_torch finds no CUDA device for a ROCm tensor and SOMA's
+    skeleton fit raised IndexError): SOMA's own torch paths instead, dense skinning and the torch rotation fit, the
+    same maths (engine/gemx/PATCHES.md)."""
+    from soma import soma
+    from soma.geometry import skeleton_transfer
+
+    for cls, key, value in (
+        (soma.SOMALayer, "mode", "dense"),
+        (skeleton_transfer.SkeletonTransfer, "use_warp_for_rotations", False),
+    ):
+        if getattr(cls.__init__, "effigy_hip", False):
+            continue
+
+        def init(self, *args, _init=cls.__init__, _key=key, _value=value, **kwargs):
+            _init(self, *args, **(kwargs | {_key: _value}))
+
+        init.effigy_hip = True
+        cls.__init__ = init
 
 
 def _check_models(mode: str):
@@ -635,10 +658,11 @@ def run(op, in_dir, out_dir, params):
         raise StepError("failed", str(e)) from e
     shutil.move(str(out / "_clip" / "clip.glb"), str(out / "clip.glb"))
     shutil.rmtree(out / "_clip", ignore_errors=True)
-    preview(work / "clip.mp4", kp2d, boxes, out / "preview.mp4")
+    shown = preview(work / "clip.mp4", kp2d, boxes, out / "preview.mp4")
     shutil.rmtree(work, ignore_errors=True)
     return {
-        "outputs": {"clip": "clip.glb", "bvh": "motion.bvh", "preview": "preview.mp4"},
+        "outputs": {"clip": "clip.glb", "bvh": "motion.bvh"}
+        | ({"preview": "preview.mp4"} if shown else {}),
         "metrics": {
             "name": name,
             "mode": p["mode"],
@@ -657,25 +681,40 @@ def run(op, in_dir, out_dir, params):
     }
 
 
-def preview(video: Path, kp2d: np.ndarray, boxes: np.ndarray, dst: Path) -> None:
-    """The clip with the person's box and its 2D keypoints (confidence > 0.5), for the Animate panel."""
+def preview(video: Path, kp2d: np.ndarray, boxes: np.ndarray, dst: Path) -> bool:
+    """The clip with the person's box and its 2D keypoints (confidence > 0.5), for the Animate panel; False (and no
+    file) when the encoder fails: a picture of the job, not its result, the motion stays. VP9 in MP4 through PyAV's
+    libvpx (BSD): OpenCV's mp4v (MPEG-4 Part 2) played in no browser the app runs in (Firefox and Chromium said "no
+    video with supported format"), and its H.264 would be x264 (GPL)."""
+    import av
     import cv2
 
     cap = cv2.VideoCapture(str(video))
     w, h = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH)), int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
-    writer = cv2.VideoWriter(str(dst), cv2.VideoWriter_fourcc(*"mp4v"), FPS, (w, h))
-    for t in range(len(kp2d)):
-        ok, frame = cap.read()
-        if not ok:
-            break
-        x0, y0, x1, y1 = boxes[t].astype(int)
-        cv2.rectangle(frame, (x0, y0), (x1, y1), (0, 200, 255), 2)
-        for x, y, c in kp2d[t]:
-            if c > 0.5:
-                cv2.circle(frame, (int(x), int(y)), 3, (60, 220, 60), -1)
-        writer.write(frame)
-    cap.release()
-    writer.release()
+    try:
+        with av.open(str(dst), "w") as out:
+            # constant quality, the fastest preset: a preview (a 6.7 s 720p clip took 0.4 s, 460 KB)
+            opts = {"crf": "36", "b": "0", "deadline": "realtime", "cpu-used": "8", "row-mt": "1"}
+            stream = out.add_stream("libvpx-vp9", rate=FPS, options=opts)
+            stream.width, stream.height, stream.pix_fmt = w, h, "yuv420p"
+            for t in range(len(kp2d)):
+                ok, frame = cap.read()
+                if not ok:
+                    break
+                x0, y0, x1, y1 = boxes[t].astype(int)
+                cv2.rectangle(frame, (x0, y0), (x1, y1), (0, 200, 255), 2)
+                for x, y, c in kp2d[t]:
+                    if c > 0.5:
+                        cv2.circle(frame, (int(x), int(y)), 3, (60, 220, 60), -1)
+                out.mux(stream.encode(av.VideoFrame.from_ndarray(frame, format="bgr24")))
+            out.mux(stream.encode())  # flush the encoder
+        return True
+    except av.FFmpegError as e:
+        print(f"mocap: no preview.mp4 ({e})", file=sys.stderr)
+        dst.unlink(missing_ok=True)
+        return False
+    finally:
+        cap.release()
 
 
 if __name__ == "__main__":
